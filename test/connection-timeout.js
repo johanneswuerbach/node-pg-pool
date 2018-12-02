@@ -7,6 +7,7 @@ const describe = require('mocha').describe
 const it = require('mocha').it
 const before = require('mocha').before
 const after = require('mocha').after
+const connectionFailure = new Error('Temporary connection failure')
 
 const Pool = require('../')
 
@@ -123,6 +124,96 @@ describe('connection timeout', () => {
           expect(res.rows).to.have.length(1)
           pool.end(done)
         })
+      })
+    })
+  })
+
+  it('continues processing after a connection failure', (done) => {
+    const Client = require('pg').Client
+    const orgConnect = Client.prototype.connect
+    let called = false
+
+    Client.prototype.connect = function (cb) {
+      // Simulate a failure on first call
+      if (!called) {
+        called = true
+
+        return setTimeout(() => {
+          cb(connectionFailure)
+        }, 100)
+      }
+      // And pass-through the second call
+      orgConnect.call(this, cb)
+    }
+
+    const pool = new Pool({
+      Client: Client,
+      connectionTimeoutMillis: 1000,
+      max: 1
+    })
+
+    pool.connect((err, client, release) => {
+      expect(err).to.be(connectionFailure)
+
+      pool.query('select $1::text as name', ['brianc'], (err, res) => {
+        expect(err).to.be(undefined)
+        expect(res.rows).to.have.length(1)
+        pool.end(done)
+      })
+    })
+  })
+
+  it('releases newly connected clients if the queued already timed out', (done) => {
+    const Client = require('pg').Client
+
+    const orgConnect = Client.prototype.connect
+
+    let connection = 0
+
+    Client.prototype.connect = function (cb) {
+      // Simulate a failure on first call
+      if (connection === 0) {
+        connection++
+
+        return setTimeout(() => {
+          cb(connectionFailure)
+        }, 300)
+      }
+
+      // And second connect taking > connection timeout
+      if (connection === 1) {
+        connection++
+
+        return setTimeout(() => {
+          orgConnect.call(this, cb)
+        }, 1000)
+      }
+
+      orgConnect.call(this, cb)
+    }
+
+    const pool = new Pool({
+      Client: Client,
+      connectionTimeoutMillis: 1000,
+      max: 1
+    })
+
+    // Direct connect
+    pool.connect((err, client, release) => {
+      expect(err).to.be(connectionFailure)
+    })
+
+    // Queued
+    let called = 0
+    pool.connect((err, client, release) => {
+      // Verify the callback is only called once
+      expect(called++).to.be(0)
+      expect(err).to.be.an(Error)
+
+      pool.query('select $1::text as name', ['brianc'], (err, res) => {
+        expect(err).to.be(undefined)
+        expect(res.rows).to.have.length(1)
+        pool.end(done)
       })
     })
   })
