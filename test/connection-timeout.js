@@ -218,4 +218,63 @@ describe('connection timeout', () => {
       })
     })
   })
+
+  it('emits a maxCheckoutExceeded event on new connections', (done) => {
+    const pool = new Pool({
+      maxCheckoutMillis: 1000,
+      max: 1
+    })
+
+    let maxCheckoutExceededCount = 0
+
+    pool.on('maxCheckoutExceeded', () => {
+      maxCheckoutExceededCount++
+    })
+
+    // First connect with a slow checkout
+    pool.connect((err, client, release) => {
+      expect(err).to.be(undefined)
+
+      client.query('select pg_sleep(2)', (err) => {
+        expect(err).not.to.be.ok()
+
+        release()
+        expect(maxCheckoutExceededCount).to.be(1)
+        pool.end(done)
+      })
+    })
+  })
+
+  it('emits a maxCheckoutExceeded event on queued connections', (done) => {
+    const pool = new Pool({
+      maxCheckoutMillis: 1000,
+      max: 1
+    })
+
+    let maxCheckoutExceededCount = 0
+
+    pool.on('maxCheckoutExceeded', () => {
+      maxCheckoutExceededCount++
+    })
+
+    // First connect with a fast checkout
+    pool.connect((err, client, release) => {
+      expect(err).to.be(undefined)
+
+      // Slow checkout queued afterwards
+      pool.connect((err, client, release) => {
+        expect(err).to.be(undefined)
+
+        client.query('select pg_sleep(2)', (err) => {
+          expect(err).not.to.be.ok()
+
+          release()
+          expect(maxCheckoutExceededCount).to.be(1)
+          pool.end(done)
+        })
+      })
+
+      release()
+    })
+  })
 })

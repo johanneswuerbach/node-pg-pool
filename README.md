@@ -35,6 +35,7 @@ var pool2 = new Pool({
   min: 4, // set min pool size to 4
   idleTimeoutMillis: 1000, // close idle clients after 1 second
   connectionTimeoutMillis: 1000, // return an error after 1 second if connection could not be established
+  maxCheckoutMillis: 1000 // receive a maxCheckoutExceeded event after 1 second
 })
 
 //you can supply a custom client constructor
@@ -79,7 +80,7 @@ const pool = new Pool(config);
     ssl: true
   }
 */
-``` 
+```
 
 ### acquire clients with a promise
 
@@ -293,6 +294,30 @@ setTimeout(function () {
   console.log('connect count:', connectCount) // output: connect count: 10
   console.log('acquire count:', acquireCount) // output: acquire count: 200
 }, 100)
+
+```
+
+#### maxCheckoutExceeded
+
+Fired whenever a client is checked out longer then  `maxCheckoutMillis`
+
+Example:
+
+This allows you to count the number of clients which have exceeded the checkout timeout.
+
+```js
+var Pool = require('pg-pool')
+var pool = new Pool({ maxCheckoutMillis : 1000 })
+
+let checkoutExceededCount = 0
+
+pool.on('maxCheckoutExceeded', function (client) {
+  checkoutExceededCount++;
+})
+
+setTimeout(function () {
+  console.log('checkout exceeded count:', checkoutExceededCount) // output: checkout exceeded count: 1
+}, 1500)
 
 ```
 
