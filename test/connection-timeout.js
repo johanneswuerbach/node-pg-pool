@@ -217,4 +217,71 @@ describe('connection timeout', () => {
       })
     })
   })
+
+  it('force-unlocks new connections', (done) => {
+    const pool = new Pool({
+      connectionTimeoutMillis: 2000,
+      forceUnlockTimeoutMillis: 1000,
+      max: 1
+    })
+
+    // First connect with a slow query
+    pool.connect((err, client, release) => {
+      expect(err).to.be(undefined)
+
+      client.query('select pg_sleep(2)', (err) => {
+        expect(err).to.be.an(Error)
+      })
+    })
+
+    // Second connect waiting
+    pool.connect((err, client, release) => {
+      expect(err).to.be(undefined)
+
+      client.query('select $1::text as name', ['brianc'], (err, res) => {
+        expect(err).not.to.be.ok()
+        expect(res.rows).to.have.length(1)
+
+        release()
+        pool.end(done)
+      })
+    })
+  })
+
+  it('force-unlocks queued connections', (done) => {
+    const pool = new Pool({
+      connectionTimeoutMillis: 2000,
+      forceUnlockTimeoutMillis: 1000,
+      max: 1
+    })
+
+    // First connect with a slow query
+    pool.connect((err, client, release) => {
+      expect(err).to.be(undefined)
+
+      // Slow pending item next
+      pool.connect((err, client, release) => {
+        expect(err).to.be(undefined)
+
+        client.query('select pg_sleep(2)', (err) => {
+          expect(err).to.be.an(Error)
+        })
+      })
+
+      // Fast query queued afterwards
+      pool.connect((err, client, release) => {
+        expect(err).to.be(undefined)
+
+        client.query('select $1::text as name', ['brianc'], (err, res) => {
+          expect(err).not.to.be.ok()
+          expect(res.rows).to.have.length(1)
+
+          release()
+          pool.end(done)
+        })
+      })
+
+      release()
+    })
+  })
 })

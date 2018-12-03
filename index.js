@@ -125,7 +125,8 @@ class Pool extends EventEmitter {
       const client = idleItem.client
       client.release = release.bind(this, client)
       this.emit('acquire', client)
-      return waiter.callback(undefined, client, client.release)
+
+      return this._callCallback(client, waiter.callback)
     }
     if (!this._isFull()) {
       return this.newClient(waiter)
@@ -146,6 +147,21 @@ class Pool extends EventEmitter {
     this._clients = this._clients.filter(c => c !== client)
     client.end()
     this.emit('remove', client)
+  }
+
+  _callCallback (client, callback) {
+    if (!this.options.forceUnlockTimeoutMillis) {
+      return callback(undefined, client, client.release)
+    }
+
+    const tid = setTimeout(() => {
+      this.emit('forceUnlock', client)
+      client.release(new Error('Force unlock timeout hit'))
+    }, this.options.forceUnlockTimeoutMillis)
+    return callback(undefined, client, (err) => {
+      clearTimeout(tid)
+      client.release(err)
+    })
   }
 
   connect (cb) {
@@ -248,9 +264,11 @@ class Pool extends EventEmitter {
         this.emit('acquire', client)
         if (!pendingItem.timedOut) {
           if (this.options.verify) {
-            this.options.verify(client, pendingItem.callback)
+            this._callCallback(client, (_, client) => {
+              this.options.verify(client, pendingItem.callback)
+            })
           } else {
-            pendingItem.callback(undefined, client, client.release)
+            this._callCallback(client, pendingItem.callback)
           }
         } else {
           if (this.options.verify) {

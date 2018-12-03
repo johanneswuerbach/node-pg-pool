@@ -35,6 +35,7 @@ var pool2 = new Pool({
   min: 4, // set min pool size to 4
   idleTimeoutMillis: 1000, // close idle clients after 1 second
   connectionTimeoutMillis: 1000, // return an error after 1 second if connection could not be established
+  forceUnlockTimeoutMillis: 1000 // force unlock a client taken from the pool after 1 second and return an error
 })
 
 //you can supply a custom client constructor
@@ -79,7 +80,7 @@ const pool = new Pool(config);
     ssl: true
   }
 */
-``` 
+```
 
 ### acquire clients with a promise
 
@@ -293,6 +294,31 @@ setTimeout(function () {
   console.log('connect count:', connectCount) // output: connect count: 10
   console.log('acquire count:', acquireCount) // output: acquire count: 200
 }, 100)
+
+```
+
+#### forceUnlock
+
+Fired whenever the a client is forcefully unlocked by `forceUnlockTimeoutMillis`
+
+Example:
+
+This allows you to count the number of clients which have ever been acquired from the pool.
+
+```js
+var Pool = require('pg-pool')
+var pool = new Pool({ forceUnlockTimeoutMillis : 1000 })
+
+let forceUnlockCount = 0
+
+pool.on('forceUnlock', function (client) {
+  forceUnlockCount++;
+  console.trace('This should never happen');
+})
+
+setTimeout(function () {
+  console.log('force unlock count:', forceUnlockCount) // output: force unlock count: 1
+}, 1500)
 
 ```
 
