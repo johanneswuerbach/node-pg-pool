@@ -28,27 +28,6 @@ function throwOnRelease () {
   throw new Error('Release called on client which has already been released to the pool.')
 }
 
-function release (client, err) {
-  client.release = throwOnRelease
-  if (err || this.ending) {
-    this._remove(client)
-    this._pulseQueue()
-    return
-  }
-
-  // idle timeout
-  let tid
-  if (this.options.idleTimeoutMillis) {
-    tid = setTimeout(() => {
-      this.log('remove idle client')
-      this._remove(client)
-    }, this.options.idleTimeoutMillis)
-  }
-
-  this._idle.push(new IdleItem(client, tid))
-  this._pulseQueue()
-}
-
 function promisify (Promise, callback) {
   if (callback) {
     return { callback: callback, result: undefined }
@@ -132,17 +111,16 @@ class Pool extends EventEmitter {
     if (!this._idle.length && this._isFull()) {
       return
     }
-    const waiter = this._pendingQueue.shift()
+    const pendingItem = this._pendingQueue.shift()
     if (this._idle.length) {
       const idleItem = this._idle.pop()
       clearTimeout(idleItem.timeoutId)
       const client = idleItem.client
-      client.release = release.bind(this, client)
-      this.emit('acquire', client)
-      return waiter.callback(undefined, client, client.release)
+
+      return this._acquireClient(client, pendingItem, false)
     }
     if (!this._isFull()) {
-      return this.newClient(waiter)
+      return this.newClient(pendingItem)
     }
     throw new Error('unexpected condition')
   }
@@ -249,24 +227,66 @@ class Pool extends EventEmitter {
         }
       } else {
         this.log('new client connected')
-        client.release = release.bind(this, client)
-        this.emit('connect', client)
-        this.emit('acquire', client)
-        if (!pendingItem.timedOut) {
-          if (this.options.verify) {
-            this.options.verify(client, pendingItem.callback)
-          } else {
-            pendingItem.callback(undefined, client, client.release)
-          }
-        } else {
-          if (this.options.verify) {
-            this.options.verify(client, client.release)
-          } else {
-            client.release()
-          }
-        }
+
+        return this._acquireClient(client, pendingItem, true)
       }
     })
+  }
+
+  // acquire a client for a pending work item
+  _acquireClient (client, pendingItem, isNew) {
+    if (isNew) {
+      this.emit('connect', client)
+    }
+
+    this.emit('acquire', client)
+
+    let released = false
+
+    client.release = (err) => {
+      if (released) {
+        throwOnRelease()
+      }
+
+      released = true
+      this._release(client, err)
+    }
+
+    if (!pendingItem.timedOut) {
+      if (isNew && this.options.verify) {
+        this.options.verify(client, pendingItem.callback)
+      } else {
+        pendingItem.callback(undefined, client, client.release)
+      }
+    } else {
+      if (isNew && this.options.verify) {
+        this.options.verify(client, client.release)
+      } else {
+        client.release()
+      }
+    }
+  }
+
+  // release a client back to the poll, include an error
+  // to remove it from the pool
+  _release (client, err) {
+    if (err || this.ending) {
+      this._remove(client)
+      this._pulseQueue()
+      return
+    }
+
+    // idle timeout
+    let tid
+    if (this.options.idleTimeoutMillis) {
+      tid = setTimeout(() => {
+        this.log('remove idle client')
+        this._remove(client)
+      }, this.options.idleTimeoutMillis)
+    }
+
+    this._idle.push(new IdleItem(client, tid))
+    this._pulseQueue()
   }
 
   query (text, values, cb) {
