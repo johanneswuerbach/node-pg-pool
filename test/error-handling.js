@@ -43,6 +43,20 @@ describe('pool error handling', function () {
       expect(() => client.release()).to.throwError()
       return yield pool.end()
     }))
+
+    it('should throw each time with callbacks', function (done) {
+      const pool = new Pool()
+
+      pool.connect(function (err, client, clientDone) {
+        expect(err).not.to.be.an(Error)
+        clientDone()
+
+        expect(() => clientDone()).to.throwError()
+        expect(() => clientDone()).to.throwError()
+
+        pool.end(done)
+      })
+    })
   })
 
   describe('calling connect after end', () => {
