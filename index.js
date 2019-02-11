@@ -270,7 +270,7 @@ class Pool extends EventEmitter {
   // release a client back to the poll, include an error
   // to remove it from the pool
   _release (client, err) {
-    if (err || this.ending) {
+    if (err || this.ending || !client._queryable || client._ending) {
       this._remove(client)
       this._pulseQueue()
       return
