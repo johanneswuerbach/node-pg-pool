@@ -30,7 +30,7 @@ function throwOnRelease () {
 
 function release (client, err) {
   client.release = throwOnRelease
-  if (err || this.ending) {
+  if (err || this.ending || !client._queryable || client._ending) {
     this._remove(client)
     this._pulseQueue()
     return
