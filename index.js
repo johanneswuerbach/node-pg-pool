@@ -12,8 +12,9 @@ const removeWhere = (list, predicate) => {
 }
 
 class IdleItem {
-  constructor (client, timeoutId) {
+  constructor (client, idleListener, timeoutId) {
     this.client = client
+    this.idleListener = idleListener
     this.timeoutId = timeoutId
   }
 }
@@ -47,6 +48,7 @@ function promisify (Promise, callback) {
 function makeIdleListener (pool, client) {
   return function idleListener (err) {
     err.client = client
+
     client.removeListener('error', idleListener)
     client.on('error', () => {
       pool.log('additional client error after disconnection due to error', err)
@@ -116,8 +118,9 @@ class Pool extends EventEmitter {
       const idleItem = this._idle.pop()
       clearTimeout(idleItem.timeoutId)
       const client = idleItem.client
+      const idleListener = idleItem.idleListener
 
-      return this._acquireClient(client, pendingItem, false)
+      return this._acquireClient(client, pendingItem, idleListener, false)
     }
     if (!this._isFull()) {
       return this.newClient(pendingItem)
@@ -228,13 +231,13 @@ class Pool extends EventEmitter {
       } else {
         this.log('new client connected')
 
-        return this._acquireClient(client, pendingItem, true)
+        return this._acquireClient(client, pendingItem, idleListener, true)
       }
     })
   }
 
   // acquire a client for a pending work item
-  _acquireClient (client, pendingItem, isNew) {
+  _acquireClient (client, pendingItem, idleListener, isNew) {
     if (isNew) {
       this.emit('connect', client)
     }
@@ -249,8 +252,10 @@ class Pool extends EventEmitter {
       }
 
       released = true
-      this._release(client, err)
+      this._release(client, idleListener, err)
     }
+
+    client.removeListener('error', idleListener)
 
     if (!pendingItem.timedOut) {
       if (isNew && this.options.verify) {
@@ -269,7 +274,7 @@ class Pool extends EventEmitter {
 
   // release a client back to the poll, include an error
   // to remove it from the pool
-  _release (client, err) {
+  _release (client, idleListener, err) {
     if (err || this.ending || !client._queryable || client._ending) {
       this._remove(client)
       this._pulseQueue()
@@ -285,7 +290,9 @@ class Pool extends EventEmitter {
       }, this.options.idleTimeoutMillis)
     }
 
-    this._idle.push(new IdleItem(client, tid))
+    client.on('error', idleListener)
+
+    this._idle.push(new IdleItem(client, idleListener, tid))
     this._pulseQueue()
   }
 
