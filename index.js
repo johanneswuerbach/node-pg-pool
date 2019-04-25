@@ -259,7 +259,14 @@ class Pool extends EventEmitter {
 
     if (!pendingItem.timedOut) {
       if (isNew && this.options.verify) {
-        this.options.verify(client, pendingItem.callback)
+        this.options.verify(client, (err) => {
+          if (err) {
+            client.release(err)
+            return pendingItem.callback(err, undefined, NOOP)
+          }
+
+          pendingItem.callback(undefined, client, client.release)
+        })
       } else {
         pendingItem.callback(undefined, client, client.release)
       }
@@ -275,6 +282,8 @@ class Pool extends EventEmitter {
   // release a client back to the poll, include an error
   // to remove it from the pool
   _release (client, idleListener, err) {
+    client.on('error', idleListener)
+
     if (err || this.ending || !client._queryable || client._ending) {
       this._remove(client)
       this._pulseQueue()
@@ -289,8 +298,6 @@ class Pool extends EventEmitter {
         this._remove(client)
       }, this.options.idleTimeoutMillis)
     }
-
-    client.on('error', idleListener)
 
     this._idle.push(new IdleItem(client, idleListener, tid))
     this._pulseQueue()
